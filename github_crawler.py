@@ -7,25 +7,38 @@ from datetime import datetime, timedelta
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('CHAT_ID')
 
-def send_telegram_message(message):
-    """텔레그램 메시지 전송"""
+def send_telegram_message(message, image_url=None):
+    """텔레그램 메시지 전송 (이미지 포함 가능)"""
     if not TELEGRAM_TOKEN or not CHAT_ID:
         print("❌ 텔레그램 설정이 없습니다.")
         return False
     
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    data = {
-        'chat_id': CHAT_ID,
-        'text': message
-    }
-    
     try:
+        # 이미지가 있으면 사진과 함께 전송
+        if image_url:
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
+            data = {
+                'chat_id': CHAT_ID,
+                'photo': image_url,
+                'caption': message,
+                'parse_mode': 'HTML'
+            }
+        else:
+            # 텍스트만 전송
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+            data = {
+                'chat_id': CHAT_ID,
+                'text': message,
+                'parse_mode': 'HTML'
+            }
+        
         response = requests.post(url, data=data, timeout=30)
         if response.status_code == 200:
             print("✅ 텔레그램 메시지 전송 성공")
             return True
         else:
             print(f"❌ 텔레그램 전송 실패: {response.status_code}")
+            print(f"📄 응답: {response.text[:200]}")
             return False
     except Exception as e:
         print(f"❌ 텔레그램 전송 오류: {e}")
@@ -68,6 +81,18 @@ def crawl_ppomppu():
                 else:
                     link = 'https://ppomppu.co.kr/zboard/' + href
                 
+                # 이미지 URL 추출
+                img_tag = title_cell.select_one('img')
+                image_url = None
+                if img_tag and img_tag.get('src'):
+                    img_src = img_tag['src']
+                    if img_src.startswith('//'):
+                        image_url = 'https:' + img_src
+                    elif img_src.startswith('/'):
+                        image_url = 'https://ppomppu.co.kr' + img_src
+                    elif img_src.startswith('http'):
+                        image_url = img_src
+                
                 # 모든 td 셀 가져오기
                 all_tds = row.select('td')
                 if len(all_tds) < 6:
@@ -96,11 +121,28 @@ def crawl_ppomppu():
                 except:
                     post_time = now
                 
+                # 제품명 추출 (대괄호 내용과 상세 정보 분리)
+                product_name = title
+                store_info = ""
+                
+                # [상점명] 패턴 찾기
+                if title.startswith('[') and ']' in title:
+                    end_bracket = title.find(']')
+                    store_info = title[:end_bracket+1]
+                    product_name = title[end_bracket+1:].strip()
+                
+                # 가격 정보 분리 (괄호 안의 가격)
+                price_info = ""
+                if '(' in product_name and ')' in product_name:
+                    start_paren = product_name.rfind('(')
+                    price_info = product_name[start_paren:]
+                    product_name = product_name[:start_paren].strip()
+                
                 # 조건 확인: 최근 1시간 이내 + (추천≥3 and 조회≥1000) or (추천≥5)
                 time_diff = now - post_time
                 if time_diff <= timedelta(hours=1) and ((upvotes >= 3 and hits >= 1000) or upvotes >= 5):
-                    new_posts.append((title, link, upvotes, hits))
-                    print(f"📌 발견: {title[:50]}... (👍{upvotes}/👁{hits})")
+                    new_posts.append((title, link, upvotes, hits, product_name, store_info, price_info, image_url))
+                    print(f"📌 발견: {product_name[:30]}... (👍{upvotes}/👁{hits})")
                     
             except Exception as e:
                 print(f"❗ 게시글 처리 오류: {e}")
@@ -111,8 +153,20 @@ def crawl_ppomppu():
         print(f"📤 전송할 게시글: {len(limited_posts)}개 (총 {len(new_posts)}개 발견)")
         
         for post in limited_posts:
-            msg = f"🔥 [PPOMPPU 인기상품]\n{post[0]}\n👍 추천: {post[2]} / 👁 조회: {post[3]}\n🔗 {post[1]}"
-            send_telegram_message(msg)
+            title, link, upvotes, hits, product_name, store_info, price_info, image_url = post
+            
+            # HTML 형식으로 메시지 구성
+            msg = f"""🔥 <b>뽐뿌 인기상품</b>
+
+<b>🏷️ 상품명:</b> {product_name}
+<b>🏪 상점:</b> {store_info}
+<b>💰 가격:</b> {price_info}
+
+<b>📊 인기도:</b> 👍 {upvotes} / 👁 {hits}
+
+<a href="{link}">🔗 상품 보러가기</a>"""
+            
+            send_telegram_message(msg, image_url)
         
         if len(new_posts) == 0:
             print("📭 새로운 게시글이 없습니다.")
