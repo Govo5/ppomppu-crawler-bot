@@ -47,12 +47,13 @@ def crawl_ppomppu():
         new_posts = []
         now = datetime.now()
         
-        for row in rows[:10]:  # 최신 10개만 확인
+        for row in rows[:15]:  # 최신 15개만 확인
             try:
                 # 제목과 링크 가져오기
                 title_cell = row.select_one('td.title')
                 if not title_cell:
                     continue
+                
                 
                 link_tag = title_cell.select_one('a')
                 if not link_tag:
@@ -95,9 +96,9 @@ def crawl_ppomppu():
                 except:
                     post_time = now
                 
-                # 조건 확인: 최근 1시간 이내 + (추천≥1 or 조회≥500)
+                # 조건 확인: 최근 1시간 이내 + (추천≥3 and 조회≥1000) or (추천≥5)
                 time_diff = now - post_time
-                if time_diff <= timedelta(hours=1) and (upvotes >= 1 or hits >= 500):
+                if time_diff <= timedelta(hours=1) and ((upvotes >= 3 and hits >= 1000) or upvotes >= 5):
                     new_posts.append((title, link, upvotes, hits))
                     print(f"📌 발견: {title[:50]}... (👍{upvotes}/👁{hits})")
                     
@@ -105,11 +106,12 @@ def crawl_ppomppu():
                 print(f"❗ 게시글 처리 오류: {e}")
                 continue
         
-        # 텔레그램 전송
-        print(f"📤 전송할 게시글: {len(new_posts)}개")
+        # 텔레그램 전송 (최대 3개로 제한)
+        limited_posts = new_posts[:3]  # 최대 3개만 전송
+        print(f"📤 전송할 게시글: {len(limited_posts)}개 (총 {len(new_posts)}개 발견)")
         
-        for post in new_posts:
-            msg = f"🔥 [PPOMPPU]\n{post[0]}\n👍 추천: {post[2]} / 👁 조회: {post[3]}\n🔗 {post[1]}"
+        for post in limited_posts:
+            msg = f"🔥 [PPOMPPU 인기상품]\n{post[0]}\n👍 추천: {post[2]} / 👁 조회: {post[3]}\n🔗 {post[1]}"
             send_telegram_message(msg)
         
         if len(new_posts) == 0:
