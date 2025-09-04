@@ -1,6 +1,7 @@
 import requests
 from bs4 import BeautifulSoup
 import os
+import re
 from datetime import datetime, timedelta
 
 # 환경변수에서 텔레그램 설정 가져오기
@@ -122,21 +123,53 @@ def crawl_ppomppu():
                     post_time = now
                 
                 # 제품명 추출 (대괄호 내용과 상세 정보 분리)
+                original_title = title
                 product_name = title
-                store_info = ""
+                store_info = "정보없음"
+                price_info = "가격정보없음"
                 
                 # [상점명] 패턴 찾기
                 if title.startswith('[') and ']' in title:
                     end_bracket = title.find(']')
                     store_info = title[:end_bracket+1]
                     product_name = title[end_bracket+1:].strip()
+                else:
+                    # 상점명이 대괄호로 시작하지 않는 경우도 체크
+                    bracket_match = re.search(r'\[([^\]]+)\]', title)
+                    if bracket_match:
+                        store_info = bracket_match.group(0)
+                        product_name = title.replace(store_info, '').strip()
                 
                 # 가격 정보 분리 (괄호 안의 가격)
-                price_info = ""
-                if '(' in product_name and ')' in product_name:
-                    start_paren = product_name.rfind('(')
-                    price_info = product_name[start_paren:]
-                    product_name = product_name[:start_paren].strip()
+                # 여러 패턴의 가격 정보 찾기
+                price_patterns = [
+                    r'\(([^)]*[0-9,]+원[^)]*)\)',  # (가격원) 패턴
+                    r'\(([^)]*\d+,?\d*원[^)]*)\)', # (숫자원) 패턴
+                    r'\(([^)]*무료[^)]*)\)',       # (무료) 패턴
+                    r'\(([^)]*할인[^)]*)\)',       # (할인) 패턴
+                    r'\(([^)]*\d+%[^)]*)\)',      # (퍼센트) 패턴
+                ]
+                
+                for pattern in price_patterns:
+                    price_match = re.search(pattern, product_name)
+                    if price_match:
+                        price_info = price_match.group(1)
+                        product_name = product_name.replace(price_match.group(0), '').strip()
+                        break
+                
+                # 상품명이 너무 짧거나 비어있으면 원본 제목 사용
+                if len(product_name.strip()) < 5:
+                    product_name = original_title
+                    store_info = "정보없음"
+                    price_info = "가격정보없음"
+                
+                # 정보가 여전히 비어있으면 기본값 설정
+                if not store_info or store_info.strip() == "":
+                    store_info = "상점정보없음"
+                if not price_info or price_info.strip() == "":
+                    price_info = "가격정보없음"
+                if not product_name or product_name.strip() == "":
+                    product_name = original_title
                 
                 # 조건 확인: 최근 1시간 이내 + (추천≥3 and 조회≥1000) or (추천≥5)
                 time_diff = now - post_time
@@ -155,16 +188,26 @@ def crawl_ppomppu():
         for post in limited_posts:
             title, link, upvotes, hits, product_name, store_info, price_info, image_url = post
             
+            # 값이 비어있거나 None인 경우 기본값 설정
+            safe_product_name = product_name if product_name and product_name.strip() else "상품명 정보없음"
+            safe_store_info = store_info if store_info and store_info.strip() else "상점 정보없음"  
+            safe_price_info = price_info if price_info and price_info.strip() else "가격 정보없음"
+            
             # HTML 형식으로 메시지 구성
             msg = f"""🔥 <b>뽐뿌 인기상품</b>
 
-<b>🏷️ 상품명:</b> {product_name}
-<b>🏪 상점:</b> {store_info}
-<b>💰 가격:</b> {price_info}
+<b>🏷️ 상품명:</b> {safe_product_name}
+<b>🏪 상점:</b> {safe_store_info}
+<b>💰 가격:</b> {safe_price_info}
 
 <b>📊 인기도:</b> 👍 {upvotes} / 👁 {hits}
 
 <a href="{link}">🔗 상품 보러가기</a>"""
+            
+            print(f"📤 전송 내용 미리보기:")
+            print(f"   상품명: {safe_product_name}")
+            print(f"   상점: {safe_store_info}")
+            print(f"   가격: {safe_price_info}")
             
             send_telegram_message(msg, image_url)
         
