@@ -4,9 +4,9 @@ import os
 import re
 from datetime import datetime, timedelta
 
-# 환경변수에서 텔레그램 설정 가져오기
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
-CHAT_ID = os.getenv('CHAT_ID')
+# 환경변수에서 텔레그램 설정 가져오기 (테스트용 기본값 포함)
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN') or '7250382833:AAGjJpqkln_zsISDO-AYrEmvNFmwmF98gZs'
+CHAT_ID = os.getenv('CHAT_ID') or '59277305'
 
 def send_telegram_message(message, image_url=None):
     """텔레그램 메시지 전송 (이미지 포함 가능)"""
@@ -53,19 +53,39 @@ def crawl_ppomppu():
     URL = 'https://www.ppomppu.co.kr/zboard/zboard.php?id=ppomppu'
     
     try:
-        response = requests.get(URL, timeout=30)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(URL, headers=headers, timeout=30)
         soup = BeautifulSoup(response.text, 'html.parser')
-        rows = soup.select('tr.baseList')  # 수정된 셀렉터
+        
+        # 다양한 셀렉터 시도
+        rows = soup.select('tr.baseList')
+        if not rows:
+            rows = soup.select('tr.list0, tr.list1')
+        if not rows:
+            rows = soup.select('tr[bgcolor]')
+        if not rows:
+            rows = soup.select('table tr')[2:]  # 헤더 제외
         
         print(f"📊 찾은 게시글 수: {len(rows)}")
         
         new_posts = []
         now = datetime.now()
         
-        for row in rows[:15]:  # 최신 15개만 확인
+        for row in rows[:20]:  # 최신 20개만 확인 (증가)
             try:
-                # 제목과 링크 가져오기 (개선된 방식)
+                # 제목과 링크 가져오기 (다양한 방식 시도)
                 title_cell = row.select_one('td.title')
+                if not title_cell:
+                    title_cell = row.select_one('td[width="50%"]')
+                if not title_cell:
+                    title_cell = row.select_one('td.list_title')
+                if not title_cell:
+                    # 가장 긴 텍스트를 가진 td 찾기
+                    all_tds = row.select('td')
+                    title_cell = max(all_tds, key=lambda x: len(x.get_text(strip=True))) if all_tds else None
+                
                 if not title_cell:
                     continue
                 
@@ -73,30 +93,34 @@ def crawl_ppomppu():
                 if not link_tag:
                     continue
                 
-                # 제목 추출 - 여러 방법 시도
+                # 제목 추출 - 개선된 방법
                 title = ""
                 
-                # 방법 1: 링크 텍스트
+                # 방법 1: 링크 텍스트 (공백 정리)
                 title = link_tag.get_text(strip=True)
+                title = re.sub(r'\s+', ' ', title)  # 중복 공백 제거
                 
                 # 방법 2: title 속성 사용
-                if not title:
+                if not title or len(title) < 5:
                     title = link_tag.get('title', '').strip()
                 
                 # 방법 3: img의 alt 속성 사용
-                if not title:
+                if not title or len(title) < 5:
                     img_tag = title_cell.select_one('img')
                     if img_tag:
                         title = img_tag.get('alt', '').strip()
                         if not title:
                             title = img_tag.get('title', '').strip()
                 
-                # 방법 4: 전체 td 내용 사용
-                if not title:
+                # 방법 4: 전체 td 내용 사용 (정리 후)
+                if not title or len(title) < 5:
                     title = title_cell.get_text(strip=True)
+                    title = re.sub(r'\s+', ' ', title)
+                    # 불필요한 부분 제거
+                    title = re.sub(r'(new|N|HOT|추천|\d+:\d+)', '', title, flags=re.IGNORECASE).strip()
                 
                 # 제목이 여전히 비어있으면 건너뛰기
-                if not title or len(title) < 3:
+                if not title or len(title) < 5:
                     print(f"❌ 제목을 찾을 수 없음: td={title_cell.get_text(strip=True)[:50]}")
                     continue
                 
@@ -152,57 +176,73 @@ def crawl_ppomppu():
                 except:
                     post_time = now
                 
-                # 제품명 추출 (실제 뽐뿌 제목 형태에 맞게 개선)
+                # 제품명 추출 (뽐뿌 제목 형태 분석 - 개선된 버전)
                 original_title = title
                 product_name = title
-                store_info = "상점정보없음"
-                price_info = "가격정보없음"
+                store_info = ""
+                price_info = ""
                 
-                print(f"🔍 제목 분석 (길이: {len(title)}): {title}")
+                print(f"🔍 제목 분석: {title}")
                 
-                # 제목이 비어있거나 너무 짧으면 더 자세한 디버깅
-                if len(title) < 5:
-                    print(f"⚠️ 제목이 너무 짧음, 추가 디버깅:")
-                    print(f"   title_cell 내용: {title_cell}")
-                    print(f"   link_tag 내용: {link_tag}")
-                    if title_cell.select('img'):
-                        for img in title_cell.select('img'):
-                            print(f"   img alt: {img.get('alt', '')}")
-                            print(f"   img title: {img.get('title', '')}")
+                # 1. 상점명 추출 - 다양한 패턴 지원
+                # [상점명], (상점명), 상점명: 형태
+                store_patterns = [
+                    r'^\[([^\]]+)\]',           # [11번가]
+                    r'^\(([^)]+)\)',            # (쿠팡)
+                    r'^([^:\[]+):\s*',          # 네이버:
+                    r'([가-힣]+몰|[가-힣]+샵)',    # 옥션몰, G마켓
+                ]
                 
-                # [상점명] 패턴 찾기 - 실제 형태: [11번가], [카카오], [네이버] 등
-                store_match = re.search(r'^\[([^\]]+)\]', title)
-                if store_match:
-                    store_info = store_match.group(1)  # 대괄호 없이 상점명만
-                    # 상점명 제거한 나머지가 상품명
-                    remaining_title = title[len(store_match.group(0)):].strip()
-                    product_name = remaining_title
-                    print(f"   상점: {store_info}")
-                    print(f"   남은제목: {remaining_title}")
+                for pattern in store_patterns:
+                    store_match = re.search(pattern, title)
+                    if store_match:
+                        store_info = store_match.group(1).strip()
+                        # 상점명 제거
+                        title = title[len(store_match.group(0)):].strip()
+                        break
                 
-                # 가격 정보 분리 - 실제 형태: (149,000원/무료), (19,900원/무배) 등
-                price_match = re.search(r'\(([^)]*(?:\d+,?\d*원|무료|무배|할인)[^)]*)\)', product_name)
-                if price_match:
-                    price_info = price_match.group(1)
-                    # 가격 정보 제거한 나머지가 순수 상품명
-                    product_name = product_name.replace(price_match.group(0), '').strip()
-                    print(f"   가격: {price_info}")
-                    print(f"   상품명: {product_name}")
+                # 2. 가격 정보 추출 - 다양한 패턴
+                price_patterns = [
+                    r'\(([^)]*(?:\d+[,\d]*원|무료배송|무배|할인|원)[^)]*)\)',  # (19,900원/무배)
+                    r'(\d+[,\d]*원)',                                      # 19,900원
+                    r'(\d+[,\d]*\s*원)',                                   # 19,900 원
+                    r'(무료배송|무배|할인)',                                  # 무료배송
+                ]
                 
-                # 카테고리 정보 제거 - [기타], [식품/건강] 등
-                category_match = re.search(r'\[[^\]]*\]$', product_name)
-                if category_match:
-                    product_name = product_name.replace(category_match.group(0), '').strip()
-                    print(f"   카테고리 제거 후: {product_name}")
+                remaining_title = title
+                for pattern in price_patterns:
+                    price_match = re.search(pattern, remaining_title)
+                    if price_match:
+                        price_info = price_match.group(1).strip()
+                        # 가격 정보 제거
+                        remaining_title = remaining_title.replace(price_match.group(0), '').strip()
+                        break
                 
-                # 최종 검증 및 기본값 설정
-                if not product_name or len(product_name.strip()) < 3:
-                    product_name = original_title
-                    store_info = "상점정보없음"
-                    price_info = "가격정보없음"
-                    print(f"   ⚠️ 파싱 실패, 원본 사용: {product_name}")
+                # 3. 카테고리 제거
+                category_patterns = [
+                    r'\[[^\]]*\]$',             # 끝의 [카테고리]
+                    r'\([^)]*\)$',              # 끝의 (카테고리)
+                ]
                 
-                print(f"   ✅ 최종 - 상점:{store_info} / 가격:{price_info} / 상품:{product_name[:30]}...")
+                for pattern in category_patterns:
+                    category_match = re.search(pattern, remaining_title)
+                    if category_match:
+                        remaining_title = remaining_title.replace(category_match.group(0), '').strip()
+                
+                # 4. 최종 정리
+                product_name = remaining_title.strip()
+                
+                # 5. 기본값 설정
+                if not store_info:
+                    store_info = "기타"
+                if not price_info:
+                    price_info = "가격확인필요"
+                if not product_name or len(product_name) < 3:
+                    product_name = original_title[:50]  # 원본 제목 사용 (길이 제한)
+                
+                print(f"   ✅ 상점: {store_info}")
+                print(f"   ✅ 가격: {price_info}")
+                print(f"   ✅ 상품: {product_name[:40]}...")
                 
                 # 조건 확인: 최근 1시간 이내 + (추천≥3 and 조회≥1000) or (추천≥5)
                 time_diff = now - post_time
@@ -221,26 +261,29 @@ def crawl_ppomppu():
         for post in limited_posts:
             title, link, upvotes, hits, product_name, store_info, price_info, image_url = post
             
-            # 값이 비어있거나 None인 경우 기본값 설정
-            safe_product_name = product_name if product_name and product_name.strip() else "상품명 정보없음"
-            safe_store_info = store_info if store_info and store_info.strip() else "상점 정보없음"  
-            safe_price_info = price_info if price_info and price_info.strip() else "가격 정보없음"
+            # 안전한 값 설정 (더 의미있는 기본값)
+            safe_product_name = product_name.strip() if product_name and product_name.strip() else title[:50]
+            safe_store_info = store_info.strip() if store_info and store_info.strip() else "기타"
+            safe_price_info = price_info.strip() if price_info and price_info.strip() else "가격확인필요"
             
-            # HTML 형식으로 메시지 구성
-            msg = f"""🔥 <b>뽐뿌 인기상품</b>
+            # HTML 형식으로 메시지 구성 (더 간결하고 명확하게)
+            msg = f"""🔥 <b>뽐뿌 핫딜</b>
 
-<b>🏷️ 상품명:</b> {safe_product_name}
+<b>🛍️ 상품:</b> {safe_product_name}
 <b>🏪 상점:</b> {safe_store_info}
 <b>💰 가격:</b> {safe_price_info}
 
-<b>📊 인기도:</b> 👍 {upvotes} / 👁 {hits}
+<b>📊 인기:</b> 👍 {upvotes} / 👁 {hits}
 
-<a href="{link}">🔗 상품 보러가기</a>"""
+<a href="{link}">🔗 바로가기</a>
+
+<i>#{safe_store_info} #뽐뿌핫딜</i>"""
             
-            print(f"📤 전송 내용 미리보기:")
-            print(f"   상품명: {safe_product_name}")
+            print(f"📤 전송:")
+            print(f"   상품: {safe_product_name[:30]}...")
             print(f"   상점: {safe_store_info}")
             print(f"   가격: {safe_price_info}")
+            print(f"   인기: 👍{upvotes} 👁{hits}")
             
             send_telegram_message(msg, image_url)
         

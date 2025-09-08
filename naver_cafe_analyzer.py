@@ -33,8 +33,8 @@ class NaverCafeAnalyzer:
         self.init_database()
     
     def init_database(self):
-        """결과 저장용 데이터베이스 초기화"""
-        self.db_file = "cafe_analysis_results.db"
+        """데이터베이스 초기화"""
+        self.db_file = "naver_cafe_users_selenium.db"
         conn = sqlite3.connect(self.db_file)
         cursor = conn.cursor()
         
