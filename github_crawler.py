@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 import os
 import re
 import sqlite3
+import json
 from datetime import datetime, timedelta
 
 # 환경변수에서 텔레그램 설정 가져오기 (테스트용 기본값 포함)
@@ -75,8 +76,8 @@ def cleanup_old_posts(days=7):
     if deleted_count > 0:
         print(f"🧹 {deleted_count}개의 오래된 기록 정리")
 
-def send_telegram_message(message, image_url=None):
-    """텔레그램 메시지 전송 (이미지 포함 가능)"""
+def send_telegram_message(message, image_url=None, keyboard=None):
+    """텔레그램 메시지 전송 (이미지 및 인라인 키보드 지원)"""
     if not TELEGRAM_TOKEN or not CHAT_ID:
         print("❌ 텔레그램 설정이 없습니다.")
         return False
@@ -90,8 +91,12 @@ def send_telegram_message(message, image_url=None):
                 'photo': image_url,
                 'caption': message,
                 'parse_mode': 'HTML',
-                'disable_web_page_preview': True  # 링크 미리보기 팝업 비활성화
+                'disable_web_page_preview': True,  # 링크 미리보기 팝업 비활성화
+                'disable_notification': False,      # 알림은 유지
+                'protect_content': False             # 컨텐츠 보호 비활성화
             }
+            if keyboard:
+                data['reply_markup'] = keyboard
         else:
             # 텍스트만 전송
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -99,10 +104,19 @@ def send_telegram_message(message, image_url=None):
                 'chat_id': CHAT_ID,
                 'text': message,
                 'parse_mode': 'HTML',
-                'disable_web_page_preview': True  # 링크 미리보기 팝업 비활성화
+                'disable_web_page_preview': True,   # 링크 미리보기 팝업 비활성화
+                'disable_notification': False,      # 알림은 유지
+                'protect_content': False             # 컨텐츠 보호 비활성화
             }
+            if keyboard:
+                data['reply_markup'] = keyboard
         
-        response = requests.post(url, data=data, timeout=30)
+        # JSON 데이터가 있으면 headers를 설정하고 json으로 전송
+        if keyboard:
+            headers = {'Content-Type': 'application/json'}
+            response = requests.post(url, json=data, headers=headers, timeout=30)
+        else:
+            response = requests.post(url, data=data, timeout=30)
         if response.status_code == 200:
             print("✅ 텔레그램 메시지 전송 성공")
             return True
@@ -389,7 +403,7 @@ def crawl_ppomppu():
                 ("원" in price_info or "무료" in price_info or "할인" in price_info or "무배" in price_info)
             )
             
-            # 메시지 구성 - 링크 팝업 방지를 위해 텍스트로 표시
+            # 메시지 구성 - 인라인 키보드로 링크 제공 (팝업 완전 방지)
             if has_meaningful_price:
                 msg = f"""🔥 <b>뽐뿌 핫딜</b>
 
@@ -398,8 +412,6 @@ def crawl_ppomppu():
 <b>💰 가격:</b> {price_info.strip()}
 
 <b>📊 인기:</b> 👍 {upvotes} / 👁 {hits}
-
-<b>🔗 링크:</b> <code>{link}</code>
 
 <i>#{safe_store_info} #뽐뿌핫딜</i>"""
             else:
@@ -410,9 +422,14 @@ def crawl_ppomppu():
 
 <b>📊 인기:</b> 👍 {upvotes} / 👁 {hits}
 
-<b>🔗 링크:</b> <code>{link}</code>
-
 <i>#{safe_store_info} #뽐뿌핫딜</i>"""
+            
+            # 인라인 키보드 버튼으로 링크 제공
+            keyboard = {
+                "inline_keyboard": [
+                    [{"text": "🔗 뽐뿌에서 보기", "url": link}]
+                ]
+            }
             
             print(f"📤 전송:")
             print(f"   상품: {safe_product_name[:30]}...")
@@ -423,8 +440,8 @@ def crawl_ppomppu():
                 print(f"   가격: 정보없음 (숨김)")
             print(f"   인기: 👍{upvotes} 👁{hits}")
             
-            # 텔레그램 전송
-            success = send_telegram_message(msg, image_url)
+            # 텔레그램 전송 (인라인 키보드 포함)
+            success = send_telegram_message(msg, image_url, keyboard)
             
             # 전송 성공시 모든 해시를 데이터베이스에 기록 (강화된 중복 방지)
             if success and post_id:
