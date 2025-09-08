@@ -403,7 +403,11 @@ def crawl_ppomppu():
                 ("원" in price_info or "무료" in price_info or "할인" in price_info or "무배" in price_info)
             )
             
-            # 메시지 구성 - 인라인 키보드로 링크 제공 (팝업 완전 방지)
+            # 메시지 구성 - 링크 완전 분리 (팝업 방지 최종 방법)
+            # 링크를 공백으로 분리하여 텔레그램이 인식하지 못하게 함
+            domain_parts = link.replace('https://', '').replace('http://', '').split('/')
+            broken_link = f"https:// {domain_parts[0]} /{'/'.join(domain_parts[1:])}"
+            
             if has_meaningful_price:
                 msg = f"""🔥 <b>뽐뿌 핫딜</b>
 
@@ -412,6 +416,10 @@ def crawl_ppomppu():
 <b>💰 가격:</b> {price_info.strip()}
 
 <b>📊 인기:</b> 👍 {upvotes} / 👁 {hits}
+
+<b>🔗 뽐뿌링크:</b>
+<code>{broken_link}</code>
+<i>💡 링크 복사 → 공백 제거 → 브라우저 주소창에 붙여넣기</i>
 
 <i>#{safe_store_info} #뽐뿌핫딜</i>"""
             else:
@@ -422,14 +430,11 @@ def crawl_ppomppu():
 
 <b>📊 인기:</b> 👍 {upvotes} / 👁 {hits}
 
+<b>🔗 뽐뿌링크:</b>
+<code>{broken_link}</code>
+<i>💡 링크 복사 → 공백 제거 → 브라우저 주소창에 붙여넣기</i>
+
 <i>#{safe_store_info} #뽐뿌핫딜</i>"""
-            
-            # 인라인 키보드 버튼으로 링크 제공
-            keyboard = {
-                "inline_keyboard": [
-                    [{"text": "🔗 뽐뿌에서 보기", "url": link}]
-                ]
-            }
             
             print(f"📤 전송:")
             print(f"   상품: {safe_product_name[:30]}...")
@@ -440,8 +445,8 @@ def crawl_ppomppu():
                 print(f"   가격: 정보없음 (숨김)")
             print(f"   인기: 👍{upvotes} 👁{hits}")
             
-            # 텔레그램 전송 (인라인 키보드 포함)
-            success = send_telegram_message(msg, image_url, keyboard)
+            # 텔레그램 전송 (수정된 링크로 팝업 방지)
+            success = send_telegram_message(msg, image_url)
             
             # 전송 성공시 모든 해시를 데이터베이스에 기록 (강화된 중복 방지)
             if success and post_id:
