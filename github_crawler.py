@@ -2,11 +2,78 @@ import requests
 from bs4 import BeautifulSoup
 import os
 import re
+import sqlite3
 from datetime import datetime, timedelta
 
 # 환경변수에서 텔레그램 설정 가져오기 (테스트용 기본값 포함)
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN') or '7250382833:AAGjJpqkln_zsISDO-AYrEmvNFmwmF98gZs'
 CHAT_ID = os.getenv('CHAT_ID') or '59277305'
+
+# 데이터베이스 파일 경로
+DB_PATH = 'ppomppu_crawl.db'
+
+def init_database():
+    """데이터베이스 초기화"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS sent_posts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            post_id TEXT UNIQUE,
+            title TEXT,
+            link TEXT,
+            sent_time TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    conn.commit()
+    conn.close()
+
+def is_post_already_sent(post_id):
+    """게시글이 이미 전송되었는지 확인"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT 1 FROM sent_posts WHERE post_id = ?', (post_id,))
+    exists = cursor.fetchone() is not None
+    
+    conn.close()
+    return exists
+
+def save_sent_post(post_id, title, link):
+    """전송한 게시글 정보 저장"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute('''
+            INSERT INTO sent_posts (post_id, title, link, sent_time)
+            VALUES (?, ?, ?, ?)
+        ''', (post_id, title, link, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+        
+        conn.commit()
+        print(f"📝 전송 기록 저장: {post_id}")
+    except sqlite3.IntegrityError:
+        print(f"⚠️ 이미 저장된 게시글: {post_id}")
+    
+    conn.close()
+
+def cleanup_old_posts(days=7):
+    """오래된 게시글 기록 정리 (기본 7일)"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cutoff_date = datetime.now() - timedelta(days=days)
+    cursor.execute('DELETE FROM sent_posts WHERE created_at < ?', (cutoff_date,))
+    
+    deleted_count = cursor.rowcount
+    conn.commit()
+    conn.close()
+    
+    if deleted_count > 0:
+        print(f"🧹 {deleted_count}개의 오래된 기록 정리")
 
 def send_telegram_message(message, image_url=None):
     """텔레그램 메시지 전송 (이미지 포함 가능)"""
@@ -48,6 +115,10 @@ def send_telegram_message(message, image_url=None):
 def crawl_ppomppu():
     """뽐뿌 크롤링 함수 (GitHub Actions용)"""
     print("🚀 GitHub Actions에서 뽐뿌 크롤링 시작:", datetime.now())
+    
+    # 데이터베이스 초기화 및 정리
+    init_database()
+    cleanup_old_posts(7)  # 7일 이상 된 기록 정리
     
     # 뽐뿌 URL - 정확한 경로 사용
     URL = 'https://www.ppomppu.co.kr/zboard/zboard.php?id=ppomppu'
@@ -130,11 +201,26 @@ def crawl_ppomppu():
                 
                 print(f"📝 제목 추출 성공: {title[:50]}...")
                 
-                # 링크 중복 제거
+                # 링크 정리 및 post_id 추출
                 if href.startswith('/zboard/'):
                     link = 'https://ppomppu.co.kr' + href
                 else:
                     link = 'https://ppomppu.co.kr/zboard/' + href
+                
+                # post_id 추출 (중복 방지용)
+                post_id = None
+                if 'no=' in href:
+                    post_id = href.split('no=')[-1].split('&')[0]
+                elif 'view.php' in href:
+                    post_id = href.split('/')[-1] if '/' in href else href
+                else:
+                    # 제목 기반 간단한 ID 생성
+                    post_id = str(abs(hash(title + href)))[:10]
+                
+                # 중복 확인
+                if post_id and is_post_already_sent(post_id):
+                    print(f"🔄 이미 전송된 게시글 건너뛰기: {post_id}")
+                    continue
                 
                 # 이미지 URL 추출
                 img_tag = title_cell.select_one('img')
@@ -247,7 +333,7 @@ def crawl_ppomppu():
                 # 조건 확인: 최근 1시간 이내 + (추천≥3 and 조회≥1000) or (추천≥5)
                 time_diff = now - post_time
                 if time_diff <= timedelta(hours=1) and ((upvotes >= 3 and hits >= 1000) or upvotes >= 5):
-                    new_posts.append((title, link, upvotes, hits, product_name, store_info, price_info, image_url))
+                    new_posts.append((title, link, upvotes, hits, product_name, store_info, price_info, image_url, post_id))
                     print(f"📌 발견: {product_name[:30]}... (👍{upvotes}/👁{hits})")
                     
             except Exception as e:
@@ -259,19 +345,38 @@ def crawl_ppomppu():
         print(f"📤 전송할 게시글: {len(limited_posts)}개 (총 {len(new_posts)}개 발견)")
         
         for post in limited_posts:
-            title, link, upvotes, hits, product_name, store_info, price_info, image_url = post
+            title, link, upvotes, hits, product_name, store_info, price_info, image_url, post_id = post
             
-            # 안전한 값 설정 (더 의미있는 기본값)
+            # 안전한 값 설정
             safe_product_name = product_name.strip() if product_name and product_name.strip() else title[:50]
             safe_store_info = store_info.strip() if store_info and store_info.strip() else "기타"
-            safe_price_info = price_info.strip() if price_info and price_info.strip() else "가격확인필요"
             
-            # HTML 형식으로 메시지 구성 (더 간결하고 명확하게)
-            msg = f"""🔥 <b>뽐뿌 핫딜</b>
+            # 가격 정보가 의미있는 경우만 표시 (선택적 표시)
+            has_meaningful_price = (
+                price_info and 
+                price_info.strip() and 
+                price_info.strip() not in ["가격확인필요", "정보없음", "기타"] and
+                ("원" in price_info or "무료" in price_info or "할인" in price_info or "무배" in price_info)
+            )
+            
+            # 메시지 구성 - 가격 정보가 있을 때만 포함
+            if has_meaningful_price:
+                msg = f"""🔥 <b>뽐뿌 핫딜</b>
 
 <b>🛍️ 상품:</b> {safe_product_name}
 <b>🏪 상점:</b> {safe_store_info}
-<b>💰 가격:</b> {safe_price_info}
+<b>💰 가격:</b> {price_info.strip()}
+
+<b>📊 인기:</b> 👍 {upvotes} / 👁 {hits}
+
+<a href="{link}">🔗 바로가기</a>
+
+<i>#{safe_store_info} #뽐뿌핫딜</i>"""
+            else:
+                msg = f"""🔥 <b>뽐뿌 핫딜</b>
+
+<b>🛍️ 상품:</b> {safe_product_name}
+<b>🏪 상점:</b> {safe_store_info}
 
 <b>📊 인기:</b> 👍 {upvotes} / 👁 {hits}
 
@@ -282,10 +387,18 @@ def crawl_ppomppu():
             print(f"📤 전송:")
             print(f"   상품: {safe_product_name[:30]}...")
             print(f"   상점: {safe_store_info}")
-            print(f"   가격: {safe_price_info}")
+            if has_meaningful_price:
+                print(f"   가격: {price_info.strip()}")
+            else:
+                print(f"   가격: 정보없음 (숨김)")
             print(f"   인기: 👍{upvotes} 👁{hits}")
             
-            send_telegram_message(msg, image_url)
+            # 텔레그램 전송
+            success = send_telegram_message(msg, image_url)
+            
+            # 전송 성공시 데이터베이스에 기록
+            if success and post_id:
+                save_sent_post(post_id, safe_product_name, link)
         
         if len(new_posts) == 0:
             print("📭 새로운 게시글이 없습니다.")
