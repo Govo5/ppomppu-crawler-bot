@@ -89,7 +89,8 @@ def send_telegram_message(message, image_url=None):
                 'chat_id': CHAT_ID,
                 'photo': image_url,
                 'caption': message,
-                'parse_mode': 'HTML'
+                'parse_mode': 'HTML',
+                'disable_web_page_preview': True  # 링크 미리보기 팝업 비활성화
             }
         else:
             # 텍스트만 전송
@@ -97,7 +98,8 @@ def send_telegram_message(message, image_url=None):
             data = {
                 'chat_id': CHAT_ID,
                 'text': message,
-                'parse_mode': 'HTML'
+                'parse_mode': 'HTML',
+                'disable_web_page_preview': True  # 링크 미리보기 팝업 비활성화
             }
         
         response = requests.post(url, data=data, timeout=30)
@@ -207,19 +209,32 @@ def crawl_ppomppu():
                 else:
                     link = 'https://ppomppu.co.kr/zboard/' + href
                 
-                # post_id 추출 (중복 방지용)
+                # post_id 추출 (중복 방지용 - 개선된 버전)
                 post_id = None
+                
+                # 방법 1: URL에서 게시글 번호 추출
                 if 'no=' in href:
                     post_id = href.split('no=')[-1].split('&')[0]
-                elif 'view.php' in href:
-                    post_id = href.split('/')[-1] if '/' in href else href
-                else:
-                    # 제목 기반 간단한 ID 생성
-                    post_id = str(abs(hash(title + href)))[:10]
+                elif 'view.php' in href and '/' in href:
+                    post_id = href.split('/')[-1]
                 
-                # 중복 확인
+                # 방법 2: 제목과 링크 조합으로 고유 ID 생성 (더 안정적)
+                if not post_id or not post_id.isdigit():
+                    # 제목과 href를 조합한 해시 (더 정확한 중복 방지)
+                    unique_string = f"{title.strip()}{href}"
+                    post_id = str(abs(hash(unique_string)))[:12]
+                
+                print(f"🆔 생성된 post_id: {post_id} (href: {href[:50]}...)")
+                
+                # 중복 확인 (제목 기반 추가 확인)
                 if post_id and is_post_already_sent(post_id):
                     print(f"🔄 이미 전송된 게시글 건너뛰기: {post_id}")
+                    continue
+                
+                # 추가 중복 확인: 제목 기반
+                title_hash = str(abs(hash(title.strip())))[:10]
+                if is_post_already_sent(f"title_{title_hash}"):
+                    print(f"🔄 동일 제목 게시글 건너뛰기: {title[:30]}...")
                     continue
                 
                 # 이미지 URL 추출
@@ -396,9 +411,12 @@ def crawl_ppomppu():
             # 텔레그램 전송
             success = send_telegram_message(msg, image_url)
             
-            # 전송 성공시 데이터베이스에 기록
+            # 전송 성공시 데이터베이스에 기록 (post_id와 제목 해시 모두 저장)
             if success and post_id:
                 save_sent_post(post_id, safe_product_name, link)
+                # 제목 기반 중복 방지도 함께 저장
+                title_hash = str(abs(hash(title.strip())))[:10]
+                save_sent_post(f"title_{title_hash}", safe_product_name, link)
         
         if len(new_posts) == 0:
             print("📭 새로운 게시글이 없습니다.")
