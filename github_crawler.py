@@ -91,32 +91,25 @@ def send_telegram_message(message, image_url=None, keyboard=None):
                 'photo': image_url,
                 'caption': message,
                 'parse_mode': 'HTML',
-                'disable_web_page_preview': True,  # 링크 미리보기 팝업 비활성화
-                'disable_notification': False,      # 알림은 유지
-                'protect_content': False             # 컨텐츠 보호 비활성화
+                'disable_web_page_preview': True,   # 링크 미리보기 팝업 비활성화 (강화)
             }
             if keyboard:
                 data['reply_markup'] = keyboard
         else:
-            # 텍스트만 전송
+            # 텍스트만 전송 (disable_web_page_preview 강화)
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
             data = {
                 'chat_id': CHAT_ID,
                 'text': message,
                 'parse_mode': 'HTML',
-                'disable_web_page_preview': True,   # 링크 미리보기 팝업 비활성화
-                'disable_notification': False,      # 알림은 유지
-                'protect_content': False             # 컨텐츠 보호 비활성화
+                'disable_web_page_preview': True,   # 링크 미리보기 팝업 비활성화 (필수)
             }
             if keyboard:
                 data['reply_markup'] = keyboard
         
-        # JSON 데이터가 있으면 headers를 설정하고 json으로 전송
-        if keyboard:
-            headers = {'Content-Type': 'application/json'}
-            response = requests.post(url, json=data, headers=headers, timeout=30)
-        else:
-            response = requests.post(url, data=data, timeout=30)
+        # 항상 JSON으로 전송하여 disable_web_page_preview가 확실히 작동하도록 함
+        headers = {'Content-Type': 'application/json'}
+        response = requests.post(url, json=data, headers=headers, timeout=30)
         if response.status_code == 200:
             print("✅ 텔레그램 메시지 전송 성공")
             return True
@@ -403,11 +396,7 @@ def crawl_ppomppu():
                 ("원" in price_info or "무료" in price_info or "할인" in price_info or "무배" in price_info)
             )
             
-            # 메시지 구성 - 링크 완전 분리 (팝업 방지 최종 방법)
-            # 링크를 공백으로 분리하여 텔레그램이 인식하지 못하게 함
-            domain_parts = link.replace('https://', '').replace('http://', '').split('/')
-            broken_link = f"https:// {domain_parts[0]} /{'/'.join(domain_parts[1:])}"
-            
+            # 메시지 구성 - 클릭 가능한 링크 (disable_web_page_preview 강화)
             if has_meaningful_price:
                 msg = f"""🔥 <b>뽐뿌 핫딜</b>
 
@@ -417,9 +406,7 @@ def crawl_ppomppu():
 
 <b>📊 인기:</b> 👍 {upvotes} / 👁 {hits}
 
-<b>🔗 뽐뿌링크:</b>
-<code>{broken_link}</code>
-<i>💡 링크 복사 → 공백 제거 → 브라우저 주소창에 붙여넣기</i>
+<a href="{link}">🔗 뽐뿌에서 보기</a>
 
 <i>#{safe_store_info} #뽐뿌핫딜</i>"""
             else:
@@ -430,9 +417,7 @@ def crawl_ppomppu():
 
 <b>📊 인기:</b> 👍 {upvotes} / 👁 {hits}
 
-<b>🔗 뽐뿌링크:</b>
-<code>{broken_link}</code>
-<i>💡 링크 복사 → 공백 제거 → 브라우저 주소창에 붙여넣기</i>
+<a href="{link}">🔗 뽐뿌에서 보기</a>
 
 <i>#{safe_store_info} #뽐뿌핫딜</i>"""
             
@@ -445,7 +430,7 @@ def crawl_ppomppu():
                 print(f"   가격: 정보없음 (숨김)")
             print(f"   인기: 👍{upvotes} 👁{hits}")
             
-            # 텔레그램 전송 (수정된 링크로 팝업 방지)
+            # 텔레그램 전송 (disable_web_page_preview로 팝업 방지)
             success = send_telegram_message(msg, image_url)
             
             # 전송 성공시 모든 해시를 데이터베이스에 기록 (강화된 중복 방지)
