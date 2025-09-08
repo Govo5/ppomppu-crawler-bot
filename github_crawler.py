@@ -225,16 +225,24 @@ def crawl_ppomppu():
                     post_id = str(abs(hash(unique_string)))[:12]
                 
                 print(f"🆔 생성된 post_id: {post_id} (href: {href[:50]}...)")
+                print(f"📝 제목: {title[:50]}...")
                 
-                # 중복 확인 (제목 기반 추가 확인)
+                # 기본 중복 확인 (post_id와 제목 해시만)
+                # 1차: post_id 기반 확인
                 if post_id and is_post_already_sent(post_id):
-                    print(f"🔄 이미 전송된 게시글 건너뛰기: {post_id}")
+                    print(f"🔄 [post_id] 이미 전송된 게시글 건너뛰기: {post_id}")
                     continue
                 
-                # 추가 중복 확인: 제목 기반
+                # 2차: 제목 해시 기반 확인  
                 title_hash = str(abs(hash(title.strip())))[:10]
                 if is_post_already_sent(f"title_{title_hash}"):
-                    print(f"🔄 동일 제목 게시글 건너뛰기: {title[:30]}...")
+                    print(f"🔄 [title_hash] 동일 제목 게시글 건너뛰기: {title[:30]}...")
+                    continue
+                    
+                # 3차: 링크 해시 기반 확인
+                link_hash = str(abs(hash(link)))[:10]
+                if is_post_already_sent(f"link_{link_hash}"):
+                    print(f"🔄 [link_hash] 동일 링크 게시글 건너뛰기")
                     continue
                 
                 # 이미지 URL 추출
@@ -345,6 +353,13 @@ def crawl_ppomppu():
                 print(f"   ✅ 가격: {price_info}")
                 print(f"   ✅ 상품: {product_name[:40]}...")
                 
+                # 4차: 제목+상점 조합 중복 확인 (상점 정보 추출 후)
+                title_store_combo = f"{original_title.strip()}_{store_info}".replace(" ", "")
+                combo_hash = str(abs(hash(title_store_combo)))[:10]
+                if is_post_already_sent(f"combo_{combo_hash}"):
+                    print(f"🔄 [combo] 유사 상품 건너뛰기: {original_title[:20]}... @ {store_info}")
+                    continue
+                
                 # 조건 확인: 최근 1시간 이내 + (추천≥3 and 조회≥1000) or (추천≥5)
                 time_diff = now - post_time
                 if time_diff <= timedelta(hours=1) and ((upvotes >= 3 and hits >= 1000) or upvotes >= 5):
@@ -374,7 +389,7 @@ def crawl_ppomppu():
                 ("원" in price_info or "무료" in price_info or "할인" in price_info or "무배" in price_info)
             )
             
-            # 메시지 구성 - 가격 정보가 있을 때만 포함
+            # 메시지 구성 - 링크 팝업 방지를 위해 텍스트로 표시
             if has_meaningful_price:
                 msg = f"""🔥 <b>뽐뿌 핫딜</b>
 
@@ -384,7 +399,7 @@ def crawl_ppomppu():
 
 <b>📊 인기:</b> 👍 {upvotes} / 👁 {hits}
 
-<a href="{link}">🔗 바로가기</a>
+<b>🔗 링크:</b> <code>{link}</code>
 
 <i>#{safe_store_info} #뽐뿌핫딜</i>"""
             else:
@@ -395,7 +410,7 @@ def crawl_ppomppu():
 
 <b>📊 인기:</b> 👍 {upvotes} / 👁 {hits}
 
-<a href="{link}">🔗 바로가기</a>
+<b>🔗 링크:</b> <code>{link}</code>
 
 <i>#{safe_store_info} #뽐뿌핫딜</i>"""
             
@@ -411,12 +426,25 @@ def crawl_ppomppu():
             # 텔레그램 전송
             success = send_telegram_message(msg, image_url)
             
-            # 전송 성공시 데이터베이스에 기록 (post_id와 제목 해시 모두 저장)
+            # 전송 성공시 모든 해시를 데이터베이스에 기록 (강화된 중복 방지)
             if success and post_id:
+                # 1. post_id 저장
                 save_sent_post(post_id, safe_product_name, link)
-                # 제목 기반 중복 방지도 함께 저장
+                
+                # 2. 제목 해시 저장
                 title_hash = str(abs(hash(title.strip())))[:10]
                 save_sent_post(f"title_{title_hash}", safe_product_name, link)
+                
+                # 3. 링크 해시 저장
+                link_hash = str(abs(hash(link)))[:10]
+                save_sent_post(f"link_{link_hash}", safe_product_name, link)
+                
+                # 4. 제목+상점 조합 해시 저장
+                title_store_combo = f"{title.strip()}_{safe_store_info}".replace(" ", "")
+                combo_hash = str(abs(hash(title_store_combo)))[:10]
+                save_sent_post(f"combo_{combo_hash}", safe_product_name, link)
+                
+                print(f"💾 중복 방지 기록 완료: post_id={post_id}, title_hash={title_hash}, link_hash={link_hash}, combo_hash={combo_hash}")
         
         if len(new_posts) == 0:
             print("📭 새로운 게시글이 없습니다.")
