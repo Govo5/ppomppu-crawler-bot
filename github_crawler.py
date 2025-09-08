@@ -49,7 +49,8 @@ def crawl_ppomppu():
     """뽐뿌 크롤링 함수 (GitHub Actions용)"""
     print("🚀 GitHub Actions에서 뽐뿌 크롤링 시작:", datetime.now())
     
-    URL = 'https://ppomppu.co.kr/zboard/zboard.php?id=ppomppu'
+    # 뽐뿌 URL - 정확한 경로 사용
+    URL = 'https://www.ppomppu.co.kr/zboard/zboard.php?id=ppomppu'
     
     try:
         response = requests.get(URL, timeout=30)
@@ -63,18 +64,47 @@ def crawl_ppomppu():
         
         for row in rows[:15]:  # 최신 15개만 확인
             try:
-                # 제목과 링크 가져오기
+                # 제목과 링크 가져오기 (개선된 방식)
                 title_cell = row.select_one('td.title')
                 if not title_cell:
                     continue
                 
-                
                 link_tag = title_cell.select_one('a')
                 if not link_tag:
                     continue
-                    
+                
+                # 제목 추출 - 여러 방법 시도
+                title = ""
+                
+                # 방법 1: 링크 텍스트
                 title = link_tag.get_text(strip=True)
-                href = link_tag['href']
+                
+                # 방법 2: title 속성 사용
+                if not title:
+                    title = link_tag.get('title', '').strip()
+                
+                # 방법 3: img의 alt 속성 사용
+                if not title:
+                    img_tag = title_cell.select_one('img')
+                    if img_tag:
+                        title = img_tag.get('alt', '').strip()
+                        if not title:
+                            title = img_tag.get('title', '').strip()
+                
+                # 방법 4: 전체 td 내용 사용
+                if not title:
+                    title = title_cell.get_text(strip=True)
+                
+                # 제목이 여전히 비어있으면 건너뛰기
+                if not title or len(title) < 3:
+                    print(f"❌ 제목을 찾을 수 없음: td={title_cell.get_text(strip=True)[:50]}")
+                    continue
+                
+                href = link_tag.get('href', '')
+                if not href:
+                    continue
+                
+                print(f"📝 제목 추출 성공: {title[:50]}...")
                 
                 # 링크 중복 제거
                 if href.startswith('/zboard/'):
@@ -128,7 +158,17 @@ def crawl_ppomppu():
                 store_info = "상점정보없음"
                 price_info = "가격정보없음"
                 
-                print(f"🔍 제목 분석: {title}")
+                print(f"🔍 제목 분석 (길이: {len(title)}): {title}")
+                
+                # 제목이 비어있거나 너무 짧으면 더 자세한 디버깅
+                if len(title) < 5:
+                    print(f"⚠️ 제목이 너무 짧음, 추가 디버깅:")
+                    print(f"   title_cell 내용: {title_cell}")
+                    print(f"   link_tag 내용: {link_tag}")
+                    if title_cell.select('img'):
+                        for img in title_cell.select('img'):
+                            print(f"   img alt: {img.get('alt', '')}")
+                            print(f"   img title: {img.get('title', '')}")
                 
                 # [상점명] 패턴 찾기 - 실제 형태: [11번가], [카카오], [네이버] 등
                 store_match = re.search(r'^\[([^\]]+)\]', title)
