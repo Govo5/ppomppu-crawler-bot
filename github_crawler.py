@@ -122,54 +122,47 @@ def crawl_ppomppu():
                 except:
                     post_time = now
                 
-                # 제품명 추출 (대괄호 내용과 상세 정보 분리)
+                # 제품명 추출 (실제 뽐뿌 제목 형태에 맞게 개선)
                 original_title = title
                 product_name = title
-                store_info = "정보없음"
+                store_info = "상점정보없음"
                 price_info = "가격정보없음"
                 
-                # [상점명] 패턴 찾기
-                if title.startswith('[') and ']' in title:
-                    end_bracket = title.find(']')
-                    store_info = title[:end_bracket+1]
-                    product_name = title[end_bracket+1:].strip()
-                else:
-                    # 상점명이 대괄호로 시작하지 않는 경우도 체크
-                    bracket_match = re.search(r'\[([^\]]+)\]', title)
-                    if bracket_match:
-                        store_info = bracket_match.group(0)
-                        product_name = title.replace(store_info, '').strip()
+                print(f"🔍 제목 분석: {title}")
                 
-                # 가격 정보 분리 (괄호 안의 가격)
-                # 여러 패턴의 가격 정보 찾기
-                price_patterns = [
-                    r'\(([^)]*[0-9,]+원[^)]*)\)',  # (가격원) 패턴
-                    r'\(([^)]*\d+,?\d*원[^)]*)\)', # (숫자원) 패턴
-                    r'\(([^)]*무료[^)]*)\)',       # (무료) 패턴
-                    r'\(([^)]*할인[^)]*)\)',       # (할인) 패턴
-                    r'\(([^)]*\d+%[^)]*)\)',      # (퍼센트) 패턴
-                ]
+                # [상점명] 패턴 찾기 - 실제 형태: [11번가], [카카오], [네이버] 등
+                store_match = re.search(r'^\[([^\]]+)\]', title)
+                if store_match:
+                    store_info = store_match.group(1)  # 대괄호 없이 상점명만
+                    # 상점명 제거한 나머지가 상품명
+                    remaining_title = title[len(store_match.group(0)):].strip()
+                    product_name = remaining_title
+                    print(f"   상점: {store_info}")
+                    print(f"   남은제목: {remaining_title}")
                 
-                for pattern in price_patterns:
-                    price_match = re.search(pattern, product_name)
-                    if price_match:
-                        price_info = price_match.group(1)
-                        product_name = product_name.replace(price_match.group(0), '').strip()
-                        break
+                # 가격 정보 분리 - 실제 형태: (149,000원/무료), (19,900원/무배) 등
+                price_match = re.search(r'\(([^)]*(?:\d+,?\d*원|무료|무배|할인)[^)]*)\)', product_name)
+                if price_match:
+                    price_info = price_match.group(1)
+                    # 가격 정보 제거한 나머지가 순수 상품명
+                    product_name = product_name.replace(price_match.group(0), '').strip()
+                    print(f"   가격: {price_info}")
+                    print(f"   상품명: {product_name}")
                 
-                # 상품명이 너무 짧거나 비어있으면 원본 제목 사용
-                if len(product_name.strip()) < 5:
+                # 카테고리 정보 제거 - [기타], [식품/건강] 등
+                category_match = re.search(r'\[[^\]]*\]$', product_name)
+                if category_match:
+                    product_name = product_name.replace(category_match.group(0), '').strip()
+                    print(f"   카테고리 제거 후: {product_name}")
+                
+                # 최종 검증 및 기본값 설정
+                if not product_name or len(product_name.strip()) < 3:
                     product_name = original_title
-                    store_info = "정보없음"
-                    price_info = "가격정보없음"
-                
-                # 정보가 여전히 비어있으면 기본값 설정
-                if not store_info or store_info.strip() == "":
                     store_info = "상점정보없음"
-                if not price_info or price_info.strip() == "":
                     price_info = "가격정보없음"
-                if not product_name or product_name.strip() == "":
-                    product_name = original_title
+                    print(f"   ⚠️ 파싱 실패, 원본 사용: {product_name}")
+                
+                print(f"   ✅ 최종 - 상점:{store_info} / 가격:{price_info} / 상품:{product_name[:30]}...")
                 
                 # 조건 확인: 최근 1시간 이내 + (추천≥3 and 조회≥1000) or (추천≥5)
                 time_diff = now - post_time
