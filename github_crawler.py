@@ -91,18 +91,21 @@ def send_telegram_message(message, image_url=None, keyboard=None):
                 'photo': image_url,
                 'caption': message,
                 'parse_mode': 'HTML',
-                'disable_web_page_preview': True,   # 링크 미리보기 팝업 비활성화 (강화)
+                'disable_web_page_preview': True,   # 링크 미리보기 팝업 비활성화
             }
             if keyboard:
                 data['reply_markup'] = keyboard
         else:
-            # 텍스트만 전송 (disable_web_page_preview 강화)
+            # 텍스트만 전송 - 뽐질 봇 방식 적용 (더 강력한 팝업 방지)
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
             data = {
                 'chat_id': CHAT_ID,
                 'text': message,
                 'parse_mode': 'HTML',
-                'disable_web_page_preview': True,   # 링크 미리보기 팝업 비활성화 (필수)
+                'disable_web_page_preview': True,   # 뽐질 봇처럼 확실한 팝업 방지
+                'disable_notification': False,      # 알림 유지
+                'allow_sending_without_reply': True, # 추가 옵션
+                'protect_content': False,            # 컨텐츠 보호 비활성화
             }
             if keyboard:
                 data['reply_markup'] = keyboard
@@ -396,7 +399,7 @@ def crawl_ppomppu():
                 ("원" in price_info or "무료" in price_info or "할인" in price_info or "무배" in price_info)
             )
             
-            # 메시지 구성 - 클릭 가능한 링크 (disable_web_page_preview 강화)
+            # 메시지 구성 - 뽐질 봇 방식 적용 (링크 완전 분리)
             if has_meaningful_price:
                 msg = f"""🔥 <b>뽐뿌 핫딜</b>
 
@@ -406,9 +409,11 @@ def crawl_ppomppu():
 
 <b>📊 인기:</b> 👍 {upvotes} / 👁 {hits}
 
-<a href="{link}">🔗 뽐뿌에서 보기</a>
+<i>#{safe_store_info} #뽐뿌핫딜</i>
 
-<i>#{safe_store_info} #뽐뿌핫딜</i>"""
+━━━━━━━━━━━━━━━━━━━━
+
+🔗 {link}"""
             else:
                 msg = f"""🔥 <b>뽐뿌 핫딜</b>
 
@@ -417,9 +422,11 @@ def crawl_ppomppu():
 
 <b>📊 인기:</b> 👍 {upvotes} / 👁 {hits}
 
-<a href="{link}">🔗 뽐뿌에서 보기</a>
+<i>#{safe_store_info} #뽐뿌핫딜</i>
 
-<i>#{safe_store_info} #뽐뿌핫딜</i>"""
+━━━━━━━━━━━━━━━━━━━━
+
+🔗 {link}"""
             
             print(f"📤 전송:")
             print(f"   상품: {safe_product_name[:30]}...")
