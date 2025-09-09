@@ -96,14 +96,14 @@ def send_telegram_message(message, image_url=None, keyboard=None):
             if keyboard:
                 data['reply_markup'] = keyboard
         else:
-            # 텍스트만 전송 - 뽐질 봇 방식 적용 (더 강력한 팝업 방지)
+            # 텍스트만 전송 - 뽐질 봇 방식 적용 (알림 없음)
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
             data = {
                 'chat_id': CHAT_ID,
                 'text': message,
                 'parse_mode': 'HTML',
                 'disable_web_page_preview': True,   # 뽐질 봇처럼 확실한 팝업 방지
-                'disable_notification': False,      # 알림 유지
+                'disable_notification': True,       # 알림 비활성화 (조용한 메시지)
                 'allow_sending_without_reply': True, # 추가 옵션
                 'protect_content': False,            # 컨텐츠 보호 비활성화
             }
@@ -237,23 +237,33 @@ def crawl_ppomppu():
                 print(f"🆔 생성된 post_id: {post_id} (href: {href[:50]}...)")
                 print(f"📝 제목: {title[:50]}...")
                 
-                # 기본 중복 확인 (post_id와 제목 해시만)
+                # 강화된 중복 확인 시스템 (디버깅 로그 추가)
+                print(f"🔍 중복 확인 시작 - post_id: {post_id}")
+                
                 # 1차: post_id 기반 확인
                 if post_id and is_post_already_sent(post_id):
                     print(f"🔄 [post_id] 이미 전송된 게시글 건너뛰기: {post_id}")
                     continue
+                else:
+                    print(f"✅ [post_id] 신규 게시글: {post_id}")
                 
                 # 2차: 제목 해시 기반 확인  
                 title_hash = str(abs(hash(title.strip())))[:10]
                 if is_post_already_sent(f"title_{title_hash}"):
                     print(f"🔄 [title_hash] 동일 제목 게시글 건너뛰기: {title[:30]}...")
                     continue
+                else:
+                    print(f"✅ [title_hash] 신규 제목: {title_hash}")
                     
                 # 3차: 링크 해시 기반 확인
                 link_hash = str(abs(hash(link)))[:10]
                 if is_post_already_sent(f"link_{link_hash}"):
                     print(f"🔄 [link_hash] 동일 링크 게시글 건너뛰기")
                     continue
+                else:
+                    print(f"✅ [link_hash] 신규 링크: {link_hash}")
+                
+                print(f"🎯 모든 중복 검사 통과 - 처리 계속")
                 
                 # 이미지 URL 추출
                 img_tag = title_cell.select_one('img')
@@ -442,23 +452,31 @@ def crawl_ppomppu():
             
             # 전송 성공시 모든 해시를 데이터베이스에 기록 (강화된 중복 방지)
             if success and post_id:
+                print(f"📤 텔레그램 전송 성공! 데이터베이스 저장 시작...")
+                
                 # 1. post_id 저장
                 save_sent_post(post_id, safe_product_name, link)
+                print(f"   ✅ post_id 저장: {post_id}")
                 
                 # 2. 제목 해시 저장
                 title_hash = str(abs(hash(title.strip())))[:10]
                 save_sent_post(f"title_{title_hash}", safe_product_name, link)
+                print(f"   ✅ title_hash 저장: title_{title_hash}")
                 
                 # 3. 링크 해시 저장
                 link_hash = str(abs(hash(link)))[:10]
                 save_sent_post(f"link_{link_hash}", safe_product_name, link)
+                print(f"   ✅ link_hash 저장: link_{link_hash}")
                 
                 # 4. 제목+상점 조합 해시 저장
                 title_store_combo = f"{title.strip()}_{safe_store_info}".replace(" ", "")
                 combo_hash = str(abs(hash(title_store_combo)))[:10]
                 save_sent_post(f"combo_{combo_hash}", safe_product_name, link)
+                print(f"   ✅ combo_hash 저장: combo_{combo_hash}")
                 
-                print(f"💾 중복 방지 기록 완료: post_id={post_id}, title_hash={title_hash}, link_hash={link_hash}, combo_hash={combo_hash}")
+                print(f"💾 중복 방지 기록 완료! 다음부터 이 게시글은 차단됩니다.")
+            else:
+                print(f"❌ 전송 실패 또는 post_id 없음 - 데이터베이스 저장 건너뛰기")
         
         if len(new_posts) == 0:
             print("📭 새로운 게시글이 없습니다.")
