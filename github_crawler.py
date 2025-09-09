@@ -85,7 +85,7 @@ def send_telegram_message(message, image_url=None, keyboard=None):
         return False
     
     try:
-        # 이미지가 있으면 사진과 함께 전송
+        # 이미지가 있으면 사진과 함께 전송 (알림 비활성화)
         if image_url:
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
             data = {
@@ -94,18 +94,19 @@ def send_telegram_message(message, image_url=None, keyboard=None):
                 'caption': message,
                 'parse_mode': 'HTML',
                 'disable_web_page_preview': True,   # 링크 미리보기 팝업 비활성화
+                'disable_notification': True,       # 알림 비활성화 (조용한 메시지)
             }
             if keyboard:
                 data['reply_markup'] = keyboard
         else:
-            # 텍스트만 전송 - 뽐질 봇 방식 적용 (알림 없음)
+            # 텍스트만 전송 - 뽐질 봇 방식 적용 (완전 조용한 메시지)
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
             data = {
                 'chat_id': CHAT_ID,
                 'text': message,
                 'parse_mode': 'HTML',
                 'disable_web_page_preview': True,   # 뽐질 봇처럼 확실한 팝업 방지
-                'disable_notification': True,       # 알림 비활성화 (조용한 메시지)
+                'disable_notification': True,       # 알림 완전 비활성화
                 'allow_sending_without_reply': True, # 추가 옵션
                 'protect_content': False,            # 컨텐츠 보호 비활성화
             }
