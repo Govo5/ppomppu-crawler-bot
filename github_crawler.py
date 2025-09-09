@@ -14,18 +14,17 @@ CHAT_ID = os.getenv('CHAT_ID') or '59277305'
 DB_PATH = 'ppomppu_crawl.db'
 
 def init_database():
-    """데이터베이스 초기화"""
+    """데이터베이스 초기화 (기존 posts 테이블 구조 사용)"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
+    # 기존 posts 테이블 구조 사용 (p_c.py와 호환)
     cursor.execute('''
-        CREATE TABLE IF NOT EXISTS sent_posts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            post_id TEXT UNIQUE,
+        CREATE TABLE IF NOT EXISTS posts (
+            id TEXT PRIMARY KEY,
             title TEXT,
             link TEXT,
-            sent_time TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     ''')
     
@@ -33,41 +32,44 @@ def init_database():
     conn.close()
 
 def is_post_already_sent(post_id):
-    """게시글이 이미 전송되었는지 확인"""
+    """게시글이 이미 전송되었는지 확인 (posts 테이블 사용)"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    cursor.execute('SELECT 1 FROM sent_posts WHERE post_id = ?', (post_id,))
+    cursor.execute('SELECT 1 FROM posts WHERE id = ?', (post_id,))
     exists = cursor.fetchone() is not None
     
     conn.close()
     return exists
 
 def save_sent_post(post_id, title, link):
-    """전송한 게시글 정보 저장"""
+    """전송한 게시글 정보 저장 (posts 테이블 사용)"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
     try:
         cursor.execute('''
-            INSERT INTO sent_posts (post_id, title, link, sent_time)
+            INSERT OR IGNORE INTO posts (id, title, link, timestamp)
             VALUES (?, ?, ?, ?)
         ''', (post_id, title, link, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
         
         conn.commit()
-        print(f"📝 전송 기록 저장: {post_id}")
-    except sqlite3.IntegrityError:
-        print(f"⚠️ 이미 저장된 게시글: {post_id}")
+        if cursor.rowcount > 0:
+            print(f"📝 전송 기록 저장: {post_id}")
+        else:
+            print(f"⚠️ 이미 저장된 게시글: {post_id}")
+    except Exception as e:
+        print(f"❌ 저장 오류: {e}")
     
     conn.close()
 
 def cleanup_old_posts(days=7):
-    """오래된 게시글 기록 정리 (기본 7일)"""
+    """오래된 게시글 기록 정리 (기본 7일, posts 테이블 사용)"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
     cutoff_date = datetime.now() - timedelta(days=days)
-    cursor.execute('DELETE FROM sent_posts WHERE created_at < ?', (cutoff_date,))
+    cursor.execute('DELETE FROM posts WHERE timestamp < ?', (cutoff_date,))
     
     deleted_count = cursor.rowcount
     conn.commit()
