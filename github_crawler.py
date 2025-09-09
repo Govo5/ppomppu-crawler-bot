@@ -85,7 +85,7 @@ def send_telegram_message(message, image_url=None, keyboard=None):
         return False
     
     try:
-        # 이미지가 있으면 사진과 함께 전송 (알림 비활성화)
+        # 이미지가 있으면 사진과 함께 전송 (강력한 알림 비활성화)
         if image_url:
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
             data = {
@@ -94,7 +94,9 @@ def send_telegram_message(message, image_url=None, keyboard=None):
                 'caption': message,
                 'parse_mode': 'HTML',
                 'disable_web_page_preview': True,   # 링크 미리보기 팝업 비활성화
-                'disable_notification': True,       # 알림 비활성화 (조용한 메시지)
+                'disable_notification': True,       # 알림 완전 비활성화
+                'allow_sending_without_reply': True, # 답장 없이 전송 허용
+                'protect_content': False,            # 컨텐츠 보호 비활성화
             }
             if keyboard:
                 data['reply_markup'] = keyboard
@@ -113,11 +115,15 @@ def send_telegram_message(message, image_url=None, keyboard=None):
             if keyboard:
                 data['reply_markup'] = keyboard
         
+        # 알림 설정 로깅
+        notification_status = "🔇 조용함" if data.get('disable_notification', False) else "🔔 알림 있음"
+        print(f"📤 전송 중: {notification_status}")
+        
         # 항상 JSON으로 전송하여 disable_web_page_preview가 확실히 작동하도록 함
         headers = {'Content-Type': 'application/json'}
         response = requests.post(url, json=data, headers=headers, timeout=30)
         if response.status_code == 200:
-            print("✅ 텔레그램 메시지 전송 성공")
+            print(f"✅ 텔레그램 메시지 전송 성공 ({notification_status})")
             return True
         else:
             print(f"❌ 텔레그램 전송 실패: {response.status_code}")
